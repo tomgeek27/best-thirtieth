@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { Maximize2, Minimize2 } from 'lucide-react';
 
 const RADIUS = 1;
 
@@ -66,7 +67,42 @@ export default function GlobeMap({ destinations }) {
   const destinationsRef = useRef(destinations);
   const groupRef = useRef(null);
   const [unavailable, setUnavailable] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
   destinationsRef.current = destinations;
+
+  useEffect(() => {
+    function syncFullscreen() {
+      setFullscreen(Boolean(containerRef.current && document.fullscreenElement === containerRef.current));
+    }
+    function exitFallback(event) {
+      if (event.key === 'Escape' && !document.fullscreenElement) setFullscreen(false);
+    }
+    document.addEventListener('fullscreenchange', syncFullscreen);
+    document.addEventListener('keydown', exitFallback);
+    return () => {
+      document.removeEventListener('fullscreenchange', syncFullscreen);
+      document.removeEventListener('keydown', exitFallback);
+    };
+  }, []);
+
+  async function toggleFullscreen() {
+    const container = containerRef.current;
+    if (!container) return;
+    if (document.fullscreenElement === container) {
+      await document.exitFullscreen();
+      return;
+    }
+    if (fullscreen && !document.fullscreenElement) {
+      setFullscreen(false);
+      return;
+    }
+    if (container.requestFullscreen) {
+      try { await container.requestFullscreen(); }
+      catch { setFullscreen(true); }
+    } else {
+      setFullscreen(true);
+    }
+  }
 
   useEffect(() => {
     const container = containerRef.current;
@@ -81,7 +117,7 @@ export default function GlobeMap({ destinations }) {
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.enablePan = false;
-    controls.minDistance = 2.4;
+    controls.minDistance = 1.4;
     controls.maxDistance = 6;
     controls.autoRotate = true;
     controls.autoRotateSpeed = 0.55;
@@ -128,6 +164,9 @@ export default function GlobeMap({ destinations }) {
       width = Math.max(1, rect.width);
       height = Math.max(1, rect.height);
       camera.aspect = width / height;
+      camera.fov = width < height
+        ? THREE.MathUtils.radToDeg(2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(38) / 2) / camera.aspect))
+        : 38;
       camera.updateProjectionMatrix();
       renderer.setSize(width, height);
     }
@@ -174,7 +213,10 @@ export default function GlobeMap({ destinations }) {
     if (latest && groupRef.current) groupRef.current.rotation.set(THREE.MathUtils.degToRad(latest.latitude), -THREE.MathUtils.degToRad(latest.longitude), 0);
   }, [destinations.length]);
 
-  return <div ref={containerRef} className="globe-canvas" aria-label="Mappamondo interattivo">
+  return <div ref={containerRef} className={`globe-canvas${fullscreen ? ' is-fullscreen' : ''}`} aria-label="Mappamondo interattivo">
+    <button className="globe-fullscreen-button" type="button" onClick={toggleFullscreen} aria-label={fullscreen ? 'Esci da schermo intero' : 'Mappamondo a schermo intero'} title={fullscreen ? 'Esci da schermo intero' : 'Mappamondo a schermo intero'}>
+      {fullscreen ? <Minimize2 size={19} /> : <Maximize2 size={19} />}
+    </button>
     {unavailable && <p className="globe-unavailable">Il tuo browser non supporta il globo 3D.</p>}
     {destinations.map(destination => <div key={destination.key} className="globe-pin" ref={element => { if (element) pinsRef.current.set(destination.key, element); else pinsRef.current.delete(destination.key); }}>
       <div className="pin-faces">{destination.proposers.map(user => <PinAvatar key={user.id} user={user} />)}</div>

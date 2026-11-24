@@ -1,4 +1,5 @@
 import Database from 'better-sqlite3';
+import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 const databasePath = process.env.DB_PATH || fileURLToPath(new URL('./serata.db', import.meta.url));
@@ -13,7 +14,7 @@ db.exec(`
   );
   CREATE TABLE IF NOT EXISTS proposals (
     id INTEGER PRIMARY KEY,
-    user_id INTEGER NOT NULL UNIQUE REFERENCES users(id),
+    user_id INTEGER NOT NULL REFERENCES users(id),
     city TEXT NOT NULL,
     country TEXT NOT NULL,
     country_code TEXT NOT NULL,
@@ -33,10 +34,45 @@ db.exec(`
     phase TEXT NOT NULL DEFAULT 'lobby',
     speaker_id INTEGER REFERENCES users(id),
     reveal_started_at INTEGER,
-    roulette_started_at INTEGER
+    roulette_started_at INTEGER,
+    session_id TEXT
   );
   INSERT OR IGNORE INTO evening_state (id) VALUES (1);
 `);
+
+const eveningStateColumns = db.pragma('table_info(evening_state)').map(column => column.name);
+if (!eveningStateColumns.includes('session_id')) db.exec('ALTER TABLE evening_state ADD COLUMN session_id TEXT');
+db.prepare('UPDATE evening_state SET session_id = ? WHERE id = 1 AND session_id IS NULL').run(randomUUID());
+
+const uniqueProposalIndex = db.pragma('index_list(proposals)').find(index => {
+  if (!index.unique) return false;
+  const identifier = index.name.replaceAll('"', '""');
+  const columns = db.pragma(`index_info("${identifier}")`).map(column => column.name);
+  return columns.length === 1 && columns[0] === 'user_id';
+});
+
+if (uniqueProposalIndex) {
+  db.transaction(() => {
+    db.exec(`
+      CREATE TABLE proposals_multi (
+        id INTEGER PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id),
+        city TEXT NOT NULL,
+        country TEXT NOT NULL,
+        country_code TEXT NOT NULL,
+        continent TEXT NOT NULL,
+        latitude REAL NOT NULL,
+        longitude REAL NOT NULL,
+        destination_key TEXT NOT NULL
+      );
+      INSERT INTO proposals_multi SELECT * FROM proposals;
+      DROP TABLE proposals;
+      ALTER TABLE proposals_multi RENAME TO proposals;
+    `);
+  })();
+}
+
+db.exec('CREATE INDEX IF NOT EXISTS proposals_user_id_idx ON proposals(user_id, id)');
 
 export function destinationKey(city, countryCode) {
   return `${city.trim().normalize('NFKC').toLocaleLowerCase('it-IT').replace(/\s+/g, ' ')}|${countryCode.toUpperCase()}`;

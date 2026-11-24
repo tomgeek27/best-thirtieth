@@ -1,1 +1,0 @@
-Inserisci qui le foto dei partecipanti con i nomi indicati in server/seed.js.
